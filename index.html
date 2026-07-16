@@ -66,9 +66,9 @@
               </article>
               <article class="stat-card">
                 <div class="stat-icon blue">⌑</div>
-                <p>Winning plots</p>
-                <strong id="plot-count">—</strong>
-                <small>Unique land plots</small>
+                <p>Winning cards</p>
+                <strong id="card-count">—</strong>
+                <small>Unique card IDs recorded</small>
               </article>
               <article class="stat-card">
                 <div class="stat-icon amber">↗</div>
@@ -95,6 +95,15 @@
                 <small id="latest-claim">Latest claim —</small>
               </article>
             </div>
+
+            <article class="panel guarantee-panel">
+              <div class="panel-heading guarantee-heading">
+                <div><p class="section-kicker">365-day guarantee</p><h3>Card UID progress to 50,000 Glint</h3></div>
+                <span class="guarantee-summary" id="guarantee-summary"></span>
+              </div>
+              <p class="panel-note">Tracks unique card IDs found in the prize API. Cards with no prize yet are not returned by this endpoint.</p>
+              <div class="guarantee-list" id="guarantee-list"></div>
+            </article>
 
             <article class="panel table-panel">
               <div class="panel-heading"><div><p class="section-kicker">Claim history</p><h3>Recent prizes</h3></div><span class="record-count" id="record-count"></span></div>
