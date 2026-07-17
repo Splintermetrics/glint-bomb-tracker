@@ -45,25 +45,46 @@ function renderDashboard(prizes, username) {
   const total = sorted.reduce((sum,row) => sum + Number(row.glint || 0), 0);
   const largest = Math.max(...sorted.map(row => Number(row.glint || 0)));
   const cards = groupByCard(sorted);
-  const average = Math.round(total / sorted.length);
+  const dailyResults = groupByDay(sorted);
+  const average = Math.round(total / dailyResults.length);
   $("#total-glint").textContent = number.format(total);
   $("#claim-count").textContent = number.format(sorted.length);
   $("#card-count").textContent = number.format(cards.length);
   $("#largest-prize").textContent = number.format(largest);
   $("#insight-value").textContent = number.format(average);
-  $("#latest-claim").textContent = `Latest claim · ${formatDate(sorted[0].claim_date)}`;
+  $("#insight-copy").textContent = "Average Glint per active day";
+  const chartHeading = $("#prize-chart").closest(".chart-panel").querySelector("h3");
+  const chartKicker = $("#prize-chart").closest(".chart-panel").querySelector(".section-kicker");
+  chartHeading.textContent = "Glint won per day";
+  chartKicker.textContent = "Daily distribution";
+  $("#latest-claim").textContent = `Latest active day · ${new Intl.DateTimeFormat("en-GB", {day:"2-digit",month:"short",year:"numeric"}).format(new Date(dailyResults[dailyResults.length - 1].date))}`;
   $("#record-count").textContent = `${sorted.length} record${sorted.length === 1 ? "" : "s"}`;
   $("#updated-label").textContent = `Updated ${new Intl.DateTimeFormat("en-GB", {hour:"2-digit",minute:"2-digit",second:"2-digit"}).format(new Date())}`;
 
-  $("#prize-chart").innerHTML = sorted.slice().reverse().map((row, index) => {
-    const height = Math.max(4, (Number(row.glint || 0) / largest) * 145);
-    const label = new Intl.DateTimeFormat("en-GB", {day:"2-digit",month:"short"}).format(new Date(row.claim_date));
-    return `<div class="bar-group" title="${number.format(row.glint)} Glint"><span class="bar-value">${number.format(row.glint)}</span><div class="bar" style="height:${height}px"></div><span class="bar-label">${label}</span></div>`;
+  const largestDay = Math.max(...dailyResults.map(day => day.glint));
+  $("#prize-chart").innerHTML = dailyResults.map(day => {
+    const height = Math.max(4, (day.glint / largestDay) * 145);
+    const label = new Intl.DateTimeFormat("en-GB", {day:"2-digit",month:"short"}).format(new Date(day.date));
+    const claimLabel = `${day.claims} claim${day.claims === 1 ? "" : "s"}`;
+    return `<div class="bar-group" title="${number.format(day.glint)} Glint from ${claimLabel}"><span class="bar-value">${number.format(day.glint)}</span><div class="bar" style="height:${height}px"></div><span class="bar-label">${label} · ${day.claims}</span></div>`;
   }).join("");
   $("#claims-body").innerHTML = sorted.map(row => `<tr><td>${formatDate(row.claim_date)}</td><td class="glint-cell">✦ ${number.format(row.glint)}</td><td>#${escapeHtml(row.plot)}</td><td class="mono">${escapeHtml(row.card_uid)}</td><td><span class="claimed">Claimed</span></td></tr>`).join("");
   renderGuarantees(cards);
   $("#status").hidden = true;
   $("#dashboard-content").hidden = false;
+}
+
+function groupByDay(prizes) {
+  const days = new Map();
+  for (const prize of prizes) {
+    const parsed = new Date(prize.claim_date);
+    const key = `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, "0")}-${String(parsed.getUTCDate()).padStart(2, "0")}`;
+    const current = days.get(key) || { date: `${key}T00:00:00.000Z`, glint: 0, claims: 0 };
+    current.glint += Number(prize.glint || 0);
+    current.claims += 1;
+    days.set(key, current);
+  }
+  return [...days.values()].sort((a,b) => new Date(a.date) - new Date(b.date));
 }
 
 function groupByCard(prizes) {
