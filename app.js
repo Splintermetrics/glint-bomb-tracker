@@ -24,49 +24,81 @@ async function loadPlayer(username) {
   history.replaceState(null, "", `?username=${encodeURIComponent(cleanName)}`);
 
   try {
-    const response = await fetch(url);
+    const [response, eligibleCards] = await Promise.all([
+      fetch(url),
+      fetchEligibleStakedCards(cleanName).catch(() => [])
+    ]);
     if (!response.ok) throw new Error(`The API returned ${response.status}.`);
     const payload = await response.json();
     if (id !== requestId) return;
     const prizes = Array.isArray(payload) ? payload : (payload?.value ?? []);
-    renderDashboard(prizes, cleanName);
+    renderDashboard(prizes, cleanName, eligibleCards);
   } catch (error) {
     $("#status").className = "status error";
     $("#status").textContent = `Unable to load this player. ${error.message}`;
   } finally { if (id === requestId) button.disabled = false; }
 }
 
-function renderDashboard(prizes, username) {
-  if (!prizes.length) {
-    $("#status").textContent = `No Glint Bomb prizes found for @${username}.`;
+function renderDashboard(prizes, username, eligibleCards = []) {
+  const sorted = [...prizes].sort((a,b) => new Date(b.claim_date) - new Date(a.claim_date));
+  const cards = mergeEligibleCards(groupByCard(sorted), eligibleCards);
+  if (!sorted.length && !cards.length) {
+    $("#status").textContent = `No Glint Recovery stakes or Glint Bomb prizes found for @${username}.`;
     return;
   }
-  const sorted = [...prizes].sort((a,b) => new Date(b.claim_date) - new Date(a.claim_date));
   const total = sorted.reduce((sum,row) => sum + Number(row.glint || 0), 0);
-  const largest = Math.max(...sorted.map(row => Number(row.glint || 0)));
-  const cards = groupByCard(sorted);
+  const largest = sorted.length ? Math.max(...sorted.map(row => Number(row.glint || 0))) : 0;
   const dailyResults = groupByDay(sorted);
-  const average = Math.round(total / dailyResults.length);
+  const average = dailyResults.length ? Math.round(total / dailyResults.length) : 0;
   $("#total-glint").textContent = number.format(total);
   $("#claim-count").textContent = number.format(sorted.length);
-  $("#card-count").textContent = number.format(cards.length);
+  $("#card-count").textContent = number.format(eligibleCards.length);
   $("#largest-prize").textContent = number.format(largest);
   $("#insight-value").textContent = number.format(average);
-  $("#latest-claim").textContent = `Latest active day · ${new Intl.DateTimeFormat("en-GB", {day:"2-digit",month:"short",year:"numeric"}).format(new Date(dailyResults[dailyResults.length - 1].date))}`;
+  $("#latest-claim").textContent = dailyResults.length
+    ? `Latest active day · ${new Intl.DateTimeFormat("en-GB", {day:"2-digit",month:"short",year:"numeric"}).format(new Date(dailyResults[dailyResults.length - 1].date))}`
+    : "No Glint Bomb claims yet";
   $("#record-count").textContent = `${sorted.length} record${sorted.length === 1 ? "" : "s"}`;
   $("#updated-label").textContent = `Updated ${new Intl.DateTimeFormat("en-GB", {hour:"2-digit",minute:"2-digit",second:"2-digit"}).format(new Date())}`;
 
-  const largestDay = Math.max(...dailyResults.map(day => day.glint));
-  $("#prize-chart").innerHTML = dailyResults.map(day => {
+  const largestDay = dailyResults.length ? Math.max(...dailyResults.map(day => day.glint)) : 0;
+  $("#prize-chart").innerHTML = dailyResults.length ? dailyResults.map(day => {
     const height = Math.max(4, (day.glint / largestDay) * 145);
     const label = new Intl.DateTimeFormat("en-GB", {day:"2-digit",month:"short"}).format(new Date(day.date));
     const claimLabel = `${day.claims} claim${day.claims === 1 ? "" : "s"}`;
     return `<div class="bar-group" title="${number.format(day.glint)} Glint from ${claimLabel}"><span class="bar-value">${number.format(day.glint)}</span><div class="bar" style="height:${height}px"></div><span class="bar-label">${label} · ${day.claims}</span></div>`;
-  }).join("");
+  }).join("") : `<div class="chart-empty">No daily Glint results yet</div>`;
   $("#claims-body").innerHTML = sorted.map(row => `<tr><td>${formatDate(row.claim_date)}</td><td class="glint-cell">✦ ${number.format(row.glint)}</td><td>#${escapeHtml(row.plot)}</td><td class="mono">${escapeHtml(row.card_uid)}</td><td><span class="claimed">Claimed</span></td></tr>`).join("");
   renderGuarantees(cards);
   $("#status").hidden = true;
   $("#dashboard-content").hidden = false;
+}
+
+async function fetchEligibleStakedCards(username) {
+  const [collectionResponse, detailsResponse] = await Promise.all([
+    fetch(`https://api2.splinterlands.com/cards/collection/${encodeURIComponent(username)}`),
+    fetch("https://api2.splinterlands.com/cards/get_details")
+  ]);
+  if (!collectionResponse.ok || !detailsResponse.ok) throw new Error("Land card data unavailable");
+
+  const collection = await collectionResponse.json();
+  const detailsPayload = await detailsResponse.json();
+  const details = Array.isArray(detailsPayload) ? detailsPayload : (detailsPayload?.value ?? []);
+  const detailsById = new Map(details.map(detail => [Number(detail.id), detail]));
+
+  return (collection?.cards ?? []).filter(card => {
+    if (!card.stake_ref_uid || card.stake_end_date || !card.stake_start_date) return false;
+    const detail = detailsById.get(Number(card.card_detail_id));
+    const levelAbilities = detail?.stats?.land_abilities?.[Math.max(0, Number(card.level || 1) - 1)] ?? [];
+    return levelAbilities.some(ability => ability?.[0] === "GLINT_RECOVERY");
+  }).map(card => ({
+    uid: card.uid,
+    name: detailsById.get(Number(card.card_detail_id))?.name || card.uid,
+    level: Number(card.level || 1),
+    plot: card.stake_plot,
+    region: card.stake_region,
+    stakeStartDate: card.stake_start_date
+  }));
 }
 
 function groupByDay(prizes) {
@@ -98,6 +130,31 @@ function groupByCard(prizes) {
   return [...cards.values()].sort((a,b) => b.glint - a.glint);
 }
 
+function mergeEligibleCards(prizeCards, eligibleCards) {
+  const cards = new Map(prizeCards.map(card => [card.uid, card]));
+  for (const eligible of eligibleCards) {
+    const card = cards.get(eligible.uid) || {
+      uid: eligible.uid,
+      glint: 0,
+      claims: 0,
+      plots: new Set(),
+      prizes: [],
+      first: null,
+      latest: null
+    };
+    card.name = eligible.name;
+    card.level = eligible.level;
+    card.stakeStartDate = eligible.stakeStartDate;
+    card.region = eligible.region;
+    if (eligible.plot != null) card.plots.add(eligible.plot);
+    cards.set(card.uid, card);
+  }
+  return [...cards.values()].sort((a,b) =>
+    Number(Boolean(b.stakeStartDate)) - Number(Boolean(a.stakeStartDate)) ||
+    b.glint - a.glint
+  );
+}
+
 function renderGuarantees(cards) {
   const cleared = cards.filter(card => card.glint >= GUARANTEE).length;
   $("#guarantee-summary").textContent = `${cleared} of ${cards.length} passed`;
@@ -106,7 +163,7 @@ function renderGuarantees(cards) {
     const percent = Math.min(100, (card.glint / GUARANTEE) * 100);
     const passed = card.glint >= GUARANTEE;
     return `<div class="guarantee-row" data-guarantee-card="${escapeHtml(card.uid)}">
-      <div class="card-id"><strong>${escapeHtml(card.uid)}</strong><small>${card.claims} claim${card.claims === 1 ? "" : "s"} · Plot${card.plots.size === 1 ? "" : "s"} ${[...card.plots].map(plot => `<a class="plot-link" data-plot="${escapeHtml(plot)}" href="https://vapi.splinterlands.com/land/deeds/${encodeURIComponent(plot)}" target="_blank" rel="noopener noreferrer">#${escapeHtml(plot)} ↗</a>`).join(", ") || "—"}</small><small class="stake-age" data-card="${escapeHtml(card.uid)}">Checking continuous stake…</small></div>
+      <div class="card-id"><strong>${escapeHtml(card.uid)}</strong>${card.name ? `<span class="card-name">${escapeHtml(card.name)} · Level ${card.level}</span>` : ""}<small>${card.claims ? `${card.claims} claim${card.claims === 1 ? "" : "s"}` : `<span class="no-win">No Glint Bomb yet</span>`} · Plot${card.plots.size === 1 ? "" : "s"} ${[...card.plots].map(plot => `<a class="plot-link" data-plot="${escapeHtml(plot)}" href="https://vapi.splinterlands.com/land/deeds/${encodeURIComponent(plot)}" target="_blank" rel="noopener noreferrer">#${escapeHtml(plot)} ↗</a>`).join(", ") || "—"}</small><small class="stake-age" data-card="${escapeHtml(card.uid)}">Checking continuous stake…</small></div>
       <div class="progress-cell"><div class="progress-meta"><span>${number.format(card.glint)} Glint</span><span>${percent.toFixed(percent >= 10 ? 0 : 1)}%</span></div><div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div><div class="glint-split">Resolving current staking period…</div></div>
       <div class="guarantee-number"><strong>${passed ? "Threshold met" : number.format(remaining)}</strong><small>${passed ? `+${number.format(card.glint - GUARANTEE)} above` : "Glint remaining"}</small></div>
       <span class="threshold-status${passed ? " cleared" : ""}">${passed ? "✓ Passed 50K" : "Below guarantee"}</span>
@@ -150,14 +207,18 @@ async function resolveStakeDates(cards) {
     if (!target || !row) return { passed: false };
 
     try {
-      const response = await fetch(`https://api2.splinterlands.com/cards/history?id=${encodeURIComponent(card.uid)}`);
-      if (!response.ok) throw new Error("History unavailable");
-      const payload = await response.json();
-      const history = Array.isArray(payload) ? payload : (payload?.value ?? []);
-      const stakeEvents = history
-        .filter(event => event.transfer_type === "land_stake" || event.transfer_type === "land_unstake")
-        .sort((a,b) => new Date(b.transfer_date) - new Date(a.transfer_date));
-      const latestEvent = stakeEvents[0];
+      let latestEvent;
+      if (card.stakeStartDate) {
+        latestEvent = { transfer_type: "land_stake", transfer_date: card.stakeStartDate };
+      } else {
+        const response = await fetch(`https://api2.splinterlands.com/cards/history?id=${encodeURIComponent(card.uid)}`);
+        if (!response.ok) throw new Error("History unavailable");
+        const payload = await response.json();
+        const history = Array.isArray(payload) ? payload : (payload?.value ?? []);
+        latestEvent = history
+          .filter(event => event.transfer_type === "land_stake" || event.transfer_type === "land_unstake")
+          .sort((a,b) => new Date(b.transfer_date) - new Date(a.transfer_date))[0];
+      }
 
       if (!latestEvent) {
         target.textContent = "Stake date unavailable";
