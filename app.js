@@ -52,11 +52,6 @@ function renderDashboard(prizes, username) {
   $("#card-count").textContent = number.format(cards.length);
   $("#largest-prize").textContent = number.format(largest);
   $("#insight-value").textContent = number.format(average);
-  $("#insight-copy").textContent = "Average Glint per active day";
-  const chartHeading = $("#prize-chart").closest(".chart-panel").querySelector("h3");
-  const chartKicker = $("#prize-chart").closest(".chart-panel").querySelector(".section-kicker");
-  chartHeading.textContent = "Glint won per day";
-  chartKicker.textContent = "Daily distribution";
   $("#latest-claim").textContent = `Latest active day · ${new Intl.DateTimeFormat("en-GB", {day:"2-digit",month:"short",year:"numeric"}).format(new Date(dailyResults[dailyResults.length - 1].date))}`;
   $("#record-count").textContent = `${sorted.length} record${sorted.length === 1 ? "" : "s"}`;
   $("#updated-label").textContent = `Updated ${new Intl.DateTimeFormat("en-GB", {hour:"2-digit",minute:"2-digit",second:"2-digit"}).format(new Date())}`;
@@ -110,12 +105,40 @@ function renderGuarantees(cards) {
     const percent = Math.min(100, (card.glint / GUARANTEE) * 100);
     const passed = card.glint >= GUARANTEE;
     return `<div class="guarantee-row">
-      <div class="card-id"><strong>${escapeHtml(card.uid)}</strong><small>${card.claims} claim${card.claims === 1 ? "" : "s"} · Plot${card.plots.size === 1 ? "" : "s"} ${[...card.plots].map(plot => `#${escapeHtml(plot)}`).join(", ") || "—"}</small></div>
+      <div class="card-id"><strong>${escapeHtml(card.uid)}</strong><small>${card.claims} claim${card.claims === 1 ? "" : "s"} · Plot${card.plots.size === 1 ? "" : "s"} ${[...card.plots].map(plot => `<a class="plot-link" data-plot="${escapeHtml(plot)}" href="https://vapi.splinterlands.com/land/deeds/${encodeURIComponent(plot)}" target="_blank" rel="noopener noreferrer">#${escapeHtml(plot)} ↗</a>`).join(", ") || "—"}</small></div>
       <div class="progress-cell"><div class="progress-meta"><span>${number.format(card.glint)} Glint</span><span>${percent.toFixed(percent >= 10 ? 0 : 1)}%</span></div><div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div></div>
       <div class="guarantee-number"><strong>${passed ? "Threshold met" : number.format(remaining)}</strong><small>${passed ? `+${number.format(card.glint - GUARANTEE)} above` : "Glint remaining"}</small></div>
       <span class="threshold-status${passed ? " cleared" : ""}">${passed ? "✓ Passed 50K" : "Below guarantee"}</span>
     </div>`;
   }).join("");
+  resolvePlotLinks();
+}
+
+async function resolvePlotLinks() {
+  const links = [...document.querySelectorAll(".plot-link")];
+  const plots = [...new Set(links.map(link => link.dataset.plot))];
+  const routes = new Map();
+
+  await Promise.all(plots.map(async plot => {
+    try {
+      const response = await fetch(`https://vapi.splinterlands.com/land/deeds/${encodeURIComponent(plot)}`);
+      if (!response.ok) return;
+      const payload = await response.json();
+      const deed = payload?.data;
+      if (!deed?.region_number) return;
+      routes.set(plot, `https://splinterlands.com/land/overview/praetoria/${deed.region_number}/${plot}`);
+    } catch {
+      // Keep the public deed API as a fallback link.
+    }
+  }));
+
+  for (const link of links) {
+    const gameUrl = routes.get(link.dataset.plot);
+    if (gameUrl) {
+      link.href = gameUrl;
+      link.title = `Open plot #${link.dataset.plot} in Splinterlands`;
+    }
+  }
 }
 
 $("#search-form").addEventListener("submit", event => { event.preventDefault(); loadPlayer($("#username").value); });
