@@ -105,13 +105,14 @@ function renderGuarantees(cards) {
     const percent = Math.min(100, (card.glint / GUARANTEE) * 100);
     const passed = card.glint >= GUARANTEE;
     return `<div class="guarantee-row">
-      <div class="card-id"><strong>${escapeHtml(card.uid)}</strong><small>${card.claims} claim${card.claims === 1 ? "" : "s"} · Plot${card.plots.size === 1 ? "" : "s"} ${[...card.plots].map(plot => `<a class="plot-link" data-plot="${escapeHtml(plot)}" href="https://vapi.splinterlands.com/land/deeds/${encodeURIComponent(plot)}" target="_blank" rel="noopener noreferrer">#${escapeHtml(plot)} ↗</a>`).join(", ") || "—"}</small></div>
+      <div class="card-id"><strong>${escapeHtml(card.uid)}</strong><small>${card.claims} claim${card.claims === 1 ? "" : "s"} · Plot${card.plots.size === 1 ? "" : "s"} ${[...card.plots].map(plot => `<a class="plot-link" data-plot="${escapeHtml(plot)}" href="https://vapi.splinterlands.com/land/deeds/${encodeURIComponent(plot)}" target="_blank" rel="noopener noreferrer">#${escapeHtml(plot)} ↗</a>`).join(", ") || "—"}</small><small class="stake-age" data-card="${escapeHtml(card.uid)}">Checking continuous stake…</small></div>
       <div class="progress-cell"><div class="progress-meta"><span>${number.format(card.glint)} Glint</span><span>${percent.toFixed(percent >= 10 ? 0 : 1)}%</span></div><div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div></div>
       <div class="guarantee-number"><strong>${passed ? "Threshold met" : number.format(remaining)}</strong><small>${passed ? `+${number.format(card.glint - GUARANTEE)} above` : "Glint remaining"}</small></div>
       <span class="threshold-status${passed ? " cleared" : ""}">${passed ? "✓ Passed 50K" : "Below guarantee"}</span>
     </div>`;
   }).join("");
   resolvePlotLinks();
+  resolveStakeDates(cards);
 }
 
 async function resolvePlotLinks() {
@@ -139,6 +140,51 @@ async function resolvePlotLinks() {
       link.title = `Open plot #${link.dataset.plot} in Splinterlands`;
     }
   }
+}
+
+async function resolveStakeDates(cards) {
+  await Promise.all(cards.map(async card => {
+    const target = document.querySelector(`.stake-age[data-card="${CSS.escape(card.uid)}"]`);
+    if (!target) return;
+
+    try {
+      const response = await fetch(`https://api2.splinterlands.com/cards/history?id=${encodeURIComponent(card.uid)}`);
+      if (!response.ok) throw new Error("History unavailable");
+      const payload = await response.json();
+      const history = Array.isArray(payload) ? payload : (payload?.value ?? []);
+      const stakeEvents = history
+        .filter(event => event.transfer_type === "land_stake" || event.transfer_type === "land_unstake")
+        .sort((a,b) => new Date(b.transfer_date) - new Date(a.transfer_date));
+      const latestEvent = stakeEvents[0];
+
+      if (!latestEvent) {
+        target.textContent = "Stake date unavailable";
+        return;
+      }
+      if (latestEvent.transfer_type === "land_unstake") {
+        target.textContent = `Not currently staked · streak reset ${formatShortDate(latestEvent.transfer_date)}`;
+        target.classList.add("stake-warning");
+        return;
+      }
+
+      const stakedAt = new Date(latestEvent.transfer_date);
+      const anniversary = new Date(stakedAt);
+      anniversary.setUTCDate(anniversary.getUTCDate() + 365);
+      const elapsed = Math.max(0, Math.floor((Date.now() - stakedAt.getTime()) / 86400000));
+      const remaining = Math.max(0, 365 - elapsed);
+      target.textContent = remaining
+        ? `Staked ${formatShortDate(stakedAt)} · ${elapsed}/365 days · ${remaining} remaining`
+        : `365 days reached ${formatShortDate(anniversary)}`;
+      target.title = `365-day anniversary: ${formatShortDate(anniversary)}`;
+      if (!remaining) target.classList.add("stake-complete");
+    } catch {
+      target.textContent = "Stake date unavailable";
+    }
+  }));
+}
+
+function formatShortDate(value) {
+  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value));
 }
 
 $("#search-form").addEventListener("submit", event => { event.preventDefault(); loadPlayer($("#username").value); });
