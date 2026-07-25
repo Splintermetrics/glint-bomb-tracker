@@ -86,9 +86,10 @@ function groupByCard(prizes) {
   const cards = new Map();
   for (const prize of prizes) {
     const uid = prize.card_uid || "Unknown card";
-    const current = cards.get(uid) || { uid, glint: 0, claims: 0, plots: new Set(), first: prize.claim_date, latest: prize.claim_date };
+    const current = cards.get(uid) || { uid, glint: 0, claims: 0, plots: new Set(), prizes: [], first: prize.claim_date, latest: prize.claim_date };
     current.glint += Number(prize.glint || 0);
     current.claims += 1;
+    current.prizes.push(prize);
     if (prize.plot != null) current.plots.add(prize.plot);
     if (new Date(prize.claim_date) < new Date(current.first)) current.first = prize.claim_date;
     if (new Date(prize.claim_date) > new Date(current.latest)) current.latest = prize.claim_date;
@@ -104,9 +105,9 @@ function renderGuarantees(cards) {
     const remaining = Math.max(0, GUARANTEE - card.glint);
     const percent = Math.min(100, (card.glint / GUARANTEE) * 100);
     const passed = card.glint >= GUARANTEE;
-    return `<div class="guarantee-row">
+    return `<div class="guarantee-row" data-guarantee-card="${escapeHtml(card.uid)}">
       <div class="card-id"><strong>${escapeHtml(card.uid)}</strong><small>${card.claims} claim${card.claims === 1 ? "" : "s"} · Plot${card.plots.size === 1 ? "" : "s"} ${[...card.plots].map(plot => `<a class="plot-link" data-plot="${escapeHtml(plot)}" href="https://vapi.splinterlands.com/land/deeds/${encodeURIComponent(plot)}" target="_blank" rel="noopener noreferrer">#${escapeHtml(plot)} ↗</a>`).join(", ") || "—"}</small><small class="stake-age" data-card="${escapeHtml(card.uid)}">Checking continuous stake…</small></div>
-      <div class="progress-cell"><div class="progress-meta"><span>${number.format(card.glint)} Glint</span><span>${percent.toFixed(percent >= 10 ? 0 : 1)}%</span></div><div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div></div>
+      <div class="progress-cell"><div class="progress-meta"><span>${number.format(card.glint)} Glint</span><span>${percent.toFixed(percent >= 10 ? 0 : 1)}%</span></div><div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div><div class="glint-split">Resolving current staking period…</div></div>
       <div class="guarantee-number"><strong>${passed ? "Threshold met" : number.format(remaining)}</strong><small>${passed ? `+${number.format(card.glint - GUARANTEE)} above` : "Glint remaining"}</small></div>
       <span class="threshold-status${passed ? " cleared" : ""}">${passed ? "✓ Passed 50K" : "Below guarantee"}</span>
     </div>`;
@@ -143,9 +144,10 @@ async function resolvePlotLinks() {
 }
 
 async function resolveStakeDates(cards) {
-  await Promise.all(cards.map(async card => {
+  const results = await Promise.all(cards.map(async card => {
     const target = document.querySelector(`.stake-age[data-card="${CSS.escape(card.uid)}"]`);
-    if (!target) return;
+    const row = document.querySelector(`.guarantee-row[data-guarantee-card="${CSS.escape(card.uid)}"]`);
+    if (!target || !row) return { passed: false };
 
     try {
       const response = await fetch(`https://api2.splinterlands.com/cards/history?id=${encodeURIComponent(card.uid)}`);
@@ -159,12 +161,14 @@ async function resolveStakeDates(cards) {
 
       if (!latestEvent) {
         target.textContent = "Stake date unavailable";
-        return;
+        setGuaranteeUnavailable(row, card);
+        return { passed: false };
       }
       if (latestEvent.transfer_type === "land_unstake") {
         target.textContent = `Not currently staked · streak reset ${formatShortDate(latestEvent.transfer_date)}`;
         target.classList.add("stake-warning");
-        return;
+        setGuaranteeProgress(row, 0, card.glint, card.glint, false);
+        return { passed: false };
       }
 
       const stakedAt = new Date(latestEvent.transfer_date);
@@ -177,14 +181,41 @@ async function resolveStakeDates(cards) {
         : `365 days reached ${formatShortDate(anniversary)}`;
       target.title = `365-day anniversary: ${formatShortDate(anniversary)}`;
       if (!remaining) target.classList.add("stake-complete");
+      const currentGlint = card.prizes
+        .filter(prize => new Date(prize.claim_date) >= stakedAt)
+        .reduce((sum, prize) => sum + Number(prize.glint || 0), 0);
+      const previousGlint = card.glint - currentGlint;
+      const passed = currentGlint >= GUARANTEE;
+      setGuaranteeProgress(row, currentGlint, previousGlint, card.glint, passed);
+      return { passed };
     } catch {
       target.textContent = "Stake date unavailable";
+      setGuaranteeUnavailable(row, card);
+      return { passed: false };
     }
   }));
+  const passed = results.filter(result => result?.passed).length;
+  $("#guarantee-summary").textContent = `${passed} of ${cards.length} passed current streak`;
 }
 
 function formatShortDate(value) {
   return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value));
+}
+
+function setGuaranteeProgress(row, currentGlint, previousGlint, lifetimeGlint, passed) {
+  const remaining = Math.max(0, GUARANTEE - currentGlint);
+  const percent = Math.min(100, (currentGlint / GUARANTEE) * 100);
+  row.querySelector(".progress-meta").innerHTML = `<span>${number.format(currentGlint)} current-streak Glint</span><span>${percent.toFixed(percent >= 10 ? 0 : 1)}%</span>`;
+  row.querySelector(".progress-fill").style.width = `${percent}%`;
+  row.querySelector(".glint-split").innerHTML = `<span>Current ${number.format(currentGlint)}</span><span>Previous ${number.format(previousGlint)}</span><span>Lifetime ${number.format(lifetimeGlint)}</span>`;
+  row.querySelector(".guarantee-number").innerHTML = `<strong>${passed ? "Threshold met" : number.format(remaining)}</strong><small>${passed ? `+${number.format(currentGlint - GUARANTEE)} above` : "Glint remaining"}</small>`;
+  const status = row.querySelector(".threshold-status");
+  status.className = `threshold-status${passed ? " cleared" : ""}`;
+  status.textContent = passed ? "✓ Passed 50K" : "Below guarantee";
+}
+
+function setGuaranteeUnavailable(row, card) {
+  row.querySelector(".glint-split").innerHTML = `<span>Lifetime ${number.format(card.glint)}</span><span>Current period unavailable</span>`;
 }
 
 $("#search-form").addEventListener("submit", event => { event.preventDefault(); loadPlayer($("#username").value); });
