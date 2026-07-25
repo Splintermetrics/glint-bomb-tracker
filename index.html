@@ -66,9 +66,9 @@
               </article>
               <article class="stat-card">
                 <div class="stat-icon blue">⌑</div>
-                <p>Winning cards</p>
+                <p>Eligible cards</p>
                 <strong id="card-count">—</strong>
-                <small>Unique card IDs recorded</small>
+                <small>Current Glint Recovery stakes</small>
               </article>
               <article class="stat-card">
                 <div class="stat-icon amber">↗</div>
@@ -81,7 +81,7 @@
             <div class="content-grid">
               <article class="panel chart-panel">
                 <div class="panel-heading">
-                  <div><p class="section-kicker">Prize distribution</p><h3>Glint by claim</h3></div>
+                  <div><p class="section-kicker">Daily distribution</p><h3>Glint won per day</h3></div>
                   <span class="legend"><i></i> Glint won</span>
                 </div>
                 <div class="chart" id="prize-chart"></div>
@@ -90,7 +90,7 @@
                 <p class="section-kicker">Quick insight</p>
                 <div class="insight-orb">✦</div>
                 <strong id="insight-value">—</strong>
-                <p id="insight-copy">Average Glint per winning claim</p>
+                <p id="insight-copy">Average Glint per active day</p>
                 <div class="insight-rule"></div>
                 <small id="latest-claim">Latest claim —</small>
               </article>
@@ -101,7 +101,7 @@
                 <div><p class="section-kicker">365-day guarantee</p><h3>Card UID progress to 50,000 Glint</h3></div>
                 <span class="guarantee-summary" id="guarantee-summary"></span>
               </div>
-              <p class="panel-note">Tracks unique card IDs found in the prize API. Cards with no prize yet are not returned by this endpoint.</p>
+              <p class="panel-note">Includes currently staked cards with Glint Recovery, including cards that have not discovered a Glint Bomb yet.</p>
               <div class="guarantee-list" id="guarantee-list"></div>
             </article>
 
