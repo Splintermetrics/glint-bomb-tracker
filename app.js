@@ -185,17 +185,24 @@ async function resolvePlotLinks() {
       const payload = await response.json();
       const deed = payload?.data;
       if (!deed?.region_number) return;
-      routes.set(plot, `https://splinterlands.com/land/overview/praetoria/${deed.region_number}/${plot}`);
+      routes.set(plot, {
+        url: `https://splinterlands.com/land/overview/praetoria/${deed.region_number}/${plot}`,
+        region: deed.region_number,
+        tract: deed.tract_number,
+        plotNumber: deed.plot_number
+      });
     } catch {
       // Keep the public deed API as a fallback link.
     }
   }));
 
   for (const link of links) {
-    const gameUrl = routes.get(link.dataset.plot);
-    if (gameUrl) {
-      link.href = gameUrl;
-      link.title = `Open plot #${link.dataset.plot} in Splinterlands`;
+    const deedRoute = routes.get(link.dataset.plot);
+    if (deedRoute) {
+      link.href = deedRoute.url;
+      link.textContent = `Region ${deedRoute.region} · Tract ${deedRoute.tract} · Plot ${deedRoute.plotNumber} ↗`;
+      link.title = `Open Region ${deedRoute.region}, Tract ${deedRoute.tract}, Plot ${deedRoute.plotNumber} in Splinterlands`;
+      link.setAttribute("aria-label", link.title);
     }
   }
 }
